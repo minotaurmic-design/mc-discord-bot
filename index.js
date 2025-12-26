@@ -3,10 +3,15 @@ const { status } = require('minecraft-server-util');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+// Environment variables from Render
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const MC_HOST = process.env.MC_HOST;
 const MC_PORT = Number(process.env.MC_PORT || 25565);
 
+// Replace with your Discord server ID
+const GUILD_ID = '870474050286268468';
+
+// Define slash commands
 const commands = [
   new SlashCommandBuilder()
     .setName('players')
@@ -16,12 +21,13 @@ const commands = [
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
+  // Register commands for this guild (instant update)
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 
   try {
-    console.log('Refreshing slash commands...');
+    console.log('Registering slash commands for the guild...');
     await rest.put(
-      Routes.applicationCommands(client.user.id), // Now client.user.id is defined
+      Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
     console.log('Slash commands registered successfully.');
