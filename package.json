@@ -1,0 +1,13 @@
+{
+  "name": "mc-discord-bot",
+  "version": "1.0.0",
+  "description": "Discord bot to show Minecraft player count",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "minecraft-server-util": "^5.4.0"
+  }
+}
