@@ -1,41 +1,33 @@
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { status } = require('minecraft-server-util');
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds
-  ]
-});
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const MC_HOST = process.env.MC_HOST;
 const MC_PORT = Number(process.env.MC_PORT || 25565);
 
-// Register the slash command
 const commands = [
   new SlashCommandBuilder()
     .setName('players')
     .setDescription('Shows the number of players and their usernames on the Minecraft server')
-]
-  .map(command => command.toJSON());
+].map(command => command.toJSON());
 
-const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+client.once('ready', async () => {
+  console.log(`Logged in as ${client.user.tag}`);
 
-(async () => {
+  const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
   try {
-    console.log('Started refreshing application (slash) commands.');
+    console.log('Refreshing slash commands...');
     await rest.put(
-      Routes.applicationCommands(client.user?.id || 'dummy'), // Will auto-refresh once client is ready
+      Routes.applicationCommands(client.user.id), // Now client.user.id is defined
       { body: commands }
     );
-    console.log('Successfully reloaded application (slash) commands.');
+    console.log('Slash commands registered successfully.');
   } catch (error) {
-    console.error(error);
+    console.error('Failed to register slash commands:', error);
   }
-})();
-
-client.once('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -47,7 +39,6 @@ client.on('interactionCreate', async interaction => {
 
       let namesText = 'No player names available.';
       if (response.players.sample && response.players.sample.length > 0) {
-        // Optional: limit to first 10 names if crowded
         const names = response.players.sample.slice(0, 10).map(p => p.name);
         namesText = names.join(', ');
         if (response.players.online > 10) namesText += ', ...';
@@ -60,7 +51,6 @@ client.on('interactionCreate', async interaction => {
           `Online: ${namesText}`,
         ephemeral: false
       });
-
     } catch (error) {
       await interaction.reply({
         content: '🔴 Server is offline or unreachable.',
