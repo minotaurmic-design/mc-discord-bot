@@ -5,11 +5,17 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 // Environment variables from Render
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const MC_HOST = process.env.MC_HOST;
-const MC_PORT = Number(process.env.MC_PORT || 25565);
+const MC_RAW = process.env.MC_HOST || '82.24.111.241:25565'; // single string, host:port
+const GUILD_ID = '870474050286268468'; // replace with your server ID
 
-// Replace with your Discord server ID
-const GUILD_ID = '870474050286268468';
+// Parse host and port
+let MC_HOST = MC_RAW;
+let MC_PORT = 25565;
+if (MC_RAW.includes(':')) {
+  const parts = MC_RAW.split(':');
+  MC_HOST = parts[0];
+  MC_PORT = Number(parts[1]);
+}
 
 // Define slash commands
 const commands = [
