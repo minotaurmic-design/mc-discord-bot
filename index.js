@@ -1,55 +1,96 @@
+// ===============================
+// Dummy Express server for Render
+// ===============================
 const express = require('express');
+const https = require('https');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => res.send('Bot is running!'));
 
-app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Listening on port ${PORT}`);
+});
 
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+// ===============================
+// Keep Render awake (self-ping)
+// ===============================
+setInterval(() => {
+  if (!process.env.RENDER_EXTERNAL_URL) return;
+
+  https
+    .get(process.env.RENDER_EXTERNAL_URL, res => {
+      res.resume();
+      console.log('Self-ping sent to keep service awake');
+    })
+    .on('error', () => {});
+}, 14 * 60 * 1000); // every 14 minutes
+
+// ===============================
+// Discord + Minecraft Bot
+// ===============================
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder
+} = require('discord.js');
+
 const { status } = require('minecraft-server-util');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-// Environment variables from Render
+// Environment variables
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const MC_RAW = process.env.MC_HOST || '82.24.111.241:25565'; // single string, host:port
-const GUILD_ID = '870474050286268468'; // replace with your server ID
+const GUILD_ID = process.env.GUILD_ID;
+const MC_RAW = process.env.MC_HOST || '82.24.111.241:25565';
 
-// Parse host and port
+// Parse Minecraft host + port
 let MC_HOST = MC_RAW;
 let MC_PORT = 25565;
+
 if (MC_RAW.includes(':')) {
   const parts = MC_RAW.split(':');
   MC_HOST = parts[0];
   MC_PORT = Number(parts[1]);
 }
 
-// Define slash commands
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
+
+// ===============================
+// Slash Command Definition
+// ===============================
 const commands = [
   new SlashCommandBuilder()
     .setName('players')
-    .setDescription('Shows the number of players and their usernames on the Minecraft server')
-].map(command => command.toJSON());
+    .setDescription('Show Minecraft server player count and usernames')
+].map(cmd => cmd.toJSON());
 
+// ===============================
+// Bot Ready
+// ===============================
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Register commands for this guild (instant update)
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 
   try {
-    console.log('Registering slash commands for the guild...');
+    console.log('Registering slash commands...');
     await rest.put(
       Routes.applicationGuildCommands(client.user.id, GUILD_ID),
       { body: commands }
     );
-    console.log('Slash commands registered successfully.');
-  } catch (error) {
-    console.error('Failed to register slash commands:', error);
+    console.log('Slash commands registered');
+  } catch (err) {
+    console.error('Command registration failed:', err);
   }
 });
 
+// ===============================
+// Command Handler
+// ===============================
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -58,26 +99,23 @@ client.on('interactionCreate', async interaction => {
       const response = await status(MC_HOST, MC_PORT);
 
       let namesText = 'No player names available.';
-      if (response.players.sample && response.players.sample.length > 0) {
-        const names = response.players.sample.slice(0, 10).map(p => p.name);
+      if (response.players.sample?.length) {
+        const names = response.players.sample.map(p => p.name);
         namesText = names.join(', ');
-        if (response.players.online > 10) namesText += ', ...';
       }
 
-      await interaction.reply({
-        content:
-          `🟢 **Server Online**\n` +
-          `Players: ${response.players.online} / ${response.players.max}\n` +
-          `Online: ${namesText}`,
-        ephemeral: false
-      });
-    } catch (error) {
-      await interaction.reply({
-        content: '🔴 Server is offline or unreachable.',
-        ephemeral: false
-      });
+      await interaction.reply(
+        `🟢 **Server Online**\n` +
+        `Players: ${response.players.online} / ${response.players.max}\n` +
+        `Online: ${namesText}`
+      );
+    } catch (err) {
+      await interaction.reply('🔴 Server is offline or unreachable.');
     }
   }
 });
 
+// ===============================
+// Login
+// ===============================
 client.login(DISCORD_TOKEN);
