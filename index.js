@@ -43,7 +43,15 @@ const { status } = require('minecraft-server-util');
 // Environment variables
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GUILD_ID = process.env.GUILD_ID;
+
+// DedicatedMC-style address can be host:port in one value
 const MC_RAW = process.env.MC_HOST || '82.24.111.241:25565';
+
+// Channel to post automated updates into
+const STATUS_CHANNEL_ID = process.env.STATUS_CHANNEL_ID;
+
+// Poll interval for change detection
+const POLL_SECONDS = Number(process.env.POLL_SECONDS || 60);
 
 // Parse Minecraft host + port
 let MC_HOST = MC_RAW;
@@ -69,11 +77,92 @@ const commands = [
 ].map(cmd => cmd.toJSON());
 
 // ===============================
+// Helper: fetch server status
+// ===============================
+async function getMinecraftSnapshot() {
+  const response = await status(MC_HOST, MC_PORT);
+
+  const online = response.players.online;
+  const max = response.players.max;
+
+  // Note: sample may be missing even when players are online (depends on server config).
+  const names = Array.isArray(response.players.sample)
+    ? response.players.sample.map(p => p.name)
+    : [];
+
+  return { online, max, names };
+}
+
+function formatNames(names, onlineCount) {
+  if (!names.length) return 'No player names available.';
+  const shown = names.slice(0, 10);
+  let text = shown.join(', ');
+  if (onlineCount > shown.length) text += ', ...';
+  return text;
+}
+
+// ===============================
+// Automated change notifications
+// ===============================
+let lastKnown = {
+  isOnline: null,   // unknown at start
+  online: null,     // last player count
+  max: null
+};
+
+async function postChangeIfNeeded(channel) {
+  try {
+    const snap = await getMinecraftSnapshot();
+
+    const now = {
+      isOnline: true,
+      online: snap.online,
+      max: snap.max
+    };
+
+    const changed =
+      lastKnown.isOnline !== now.isOnline ||
+      lastKnown.online !== now.online ||
+      lastKnown.max !== now.max;
+
+    if (changed) {
+      const namesText = formatNames(snap.names, snap.online);
+
+      await channel.send(
+        `🟢 **Minecraft Server Online**\n` +
+        `Players: ${snap.online} / ${snap.max}\n` +
+        `Online: ${namesText}`
+      );
+
+      lastKnown = now;
+      console.log('Posted status change:', lastKnown);
+    }
+  } catch (err) {
+    // Server unreachable/offline
+    const now = { isOnline: false, online: 0, max: lastKnown.max };
+
+    const changed = lastKnown.isOnline !== now.isOnline;
+
+    if (changed) {
+      await channel.send('🔴 **Minecraft Server Offline or Unreachable**');
+      lastKnown = now;
+      console.log('Posted offline transition');
+    }
+  }
+}
+
+// ===============================
 // Bot Ready
 // ===============================
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
+  // Validate required env vars
+  if (!STATUS_CHANNEL_ID) {
+    console.warn('STATUS_CHANNEL_ID is not set. Automated updates will be disabled.');
+  }
+
+  // Register slash commands (guild-scoped = near-instant)
   const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 
   try {
@@ -86,6 +175,30 @@ client.once('ready', async () => {
   } catch (err) {
     console.error('Command registration failed:', err);
   }
+
+  // Start automated polling loop (only if channel configured)
+  if (STATUS_CHANNEL_ID) {
+    try {
+      const channel = await client.channels.fetch(STATUS_CHANNEL_ID);
+
+      if (!channel || !channel.isTextBased()) {
+        console.error('STATUS_CHANNEL_ID does not resolve to a text channel.');
+        return;
+      }
+
+      // Initial check/post (sets baseline and possibly posts first message)
+      await postChangeIfNeeded(channel);
+
+      // Poll regularly; only posts when something changes
+      setInterval(() => {
+        postChangeIfNeeded(channel).catch(() => {});
+      }, POLL_SECONDS * 1000);
+
+      console.log(`Automated status polling enabled: every ${POLL_SECONDS}s`);
+    } catch (err) {
+      console.error('Failed to start automated updates:', err);
+    }
+  }
 });
 
 // ===============================
@@ -96,17 +209,12 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.commandName === 'players') {
     try {
-      const response = await status(MC_HOST, MC_PORT);
-
-      let namesText = 'No player names available.';
-      if (response.players.sample?.length) {
-        const names = response.players.sample.map(p => p.name);
-        namesText = names.join(', ');
-      }
+      const snap = await getMinecraftSnapshot();
+      const namesText = formatNames(snap.names, snap.online);
 
       await interaction.reply(
         `🟢 **Server Online**\n` +
-        `Players: ${response.players.online} / ${response.players.max}\n` +
+        `Players: ${snap.online} / ${snap.max}\n` +
         `Online: ${namesText}`
       );
     } catch (err) {
